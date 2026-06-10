@@ -1,0 +1,89 @@
+#!/bin/sh
+# Mihomo transparent proxy rules for OpenWrt 19.07/firewall3 (iptables).
+
+[ -r /lib/functions.sh ] && . /lib/functions.sh
+
+BOX_ENABLED="1"
+LAN_IF="br-lan"
+TPROXY_PORT="9898"
+DNS_PORT="1053"
+FWMARK="1"
+ROUTE_TABLE="100"
+ROUTING_MARK="255"
+PROXY_ROUTER_TCP="0"
+SERVER_IPS=""
+
+append_server_ip() {
+	SERVER_IPS="${SERVER_IPS} $1"
+}
+
+load_box_firewall_config() {
+	config_load box 2>/dev/null
+	config_get_bool BOX_ENABLED main enabled 1
+	config_get LAN_IF main lan_if "br-lan"
+	config_get TPROXY_PORT main tproxy_port "9898"
+	config_get DNS_PORT main dns_port "1053"
+	config_get FWMARK main fwmark "1"
+	config_get ROUTE_TABLE main table "100"
+	config_get ROUTING_MARK main routing_mark "255"
+	config_get_bool PROXY_ROUTER_TCP main proxy_router_tcp 0
+	SERVER_IPS=""
+	config_list_foreach main server_ip append_server_ip
+}
+
+box_fw_cleanup() {
+	iptables -t nat -D PREROUTING -i "$LAN_IF" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null
+	iptables -t nat -D PREROUTING -i "$LAN_IF" -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null
+	iptables -t mangle -D PREROUTING -i "$LAN_IF" -j BOX_MIHOMO 2>/dev/null
+	iptables -t mangle -D OUTPUT -j BOX_MIHOMO_LOCAL 2>/dev/null
+	iptables -t mangle -F BOX_MIHOMO 2>/dev/null
+	iptables -t mangle -X BOX_MIHOMO 2>/dev/null
+	iptables -t mangle -F BOX_MIHOMO_LOCAL 2>/dev/null
+	iptables -t mangle -X BOX_MIHOMO_LOCAL 2>/dev/null
+	ip rule del fwmark "$FWMARK" table "$ROUTE_TABLE" 2>/dev/null
+	ip route flush table "$ROUTE_TABLE" 2>/dev/null
+}
+
+load_box_firewall_config
+box_fw_cleanup
+[ "$BOX_ENABLED" = "1" ] || exit 0
+
+ip rule add fwmark "$FWMARK" table "$ROUTE_TABLE" 2>/dev/null
+ip route add local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" 2>/dev/null
+
+iptables -t mangle -N BOX_MIHOMO 2>/dev/null
+iptables -t mangle -N BOX_MIHOMO_LOCAL 2>/dev/null
+
+# DNS hijack: LAN clients use Mihomo DNS so fake-ip and nameserver-policy work.
+iptables -t nat -A PREROUTING -i "$LAN_IF" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
+iptables -t nat -A PREROUTING -i "$LAN_IF" -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
+
+# Let DNS hijack below send LAN DNS to Mihomo DNS before generic TProxy rules.
+iptables -t mangle -A BOX_MIHOMO -p udp --dport 53 -j RETURN
+iptables -t mangle -A BOX_MIHOMO -p tcp --dport 53 -j RETURN
+
+# Bypass traffic emitted by Mihomo itself. config.yaml sets routing-mark: 255.
+iptables -t mangle -A BOX_MIHOMO -m mark --mark "$ROUTING_MARK" -j RETURN
+iptables -t mangle -A BOX_MIHOMO_LOCAL -m mark --mark "$ROUTING_MARK" -j RETURN
+
+for ip in $SERVER_IPS; do
+	iptables -t mangle -A BOX_MIHOMO -d "$ip" -j RETURN
+	iptables -t mangle -A BOX_MIHOMO_LOCAL -d "$ip" -j RETURN
+done
+
+for subnet in \
+	0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 \
+	169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 \
+	224.0.0.0/4 240.0.0.0/4; do
+	iptables -t mangle -A BOX_MIHOMO -d "$subnet" -j RETURN
+	iptables -t mangle -A BOX_MIHOMO_LOCAL -d "$subnet" -j RETURN
+done
+
+iptables -t mangle -A BOX_MIHOMO -p tcp -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$FWMARK"
+iptables -t mangle -A BOX_MIHOMO -p udp -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$FWMARK"
+iptables -t mangle -A PREROUTING -i "$LAN_IF" -j BOX_MIHOMO
+
+if [ "$PROXY_ROUTER_TCP" = "1" ]; then
+	iptables -t mangle -A BOX_MIHOMO_LOCAL -p tcp -j MARK --set-mark "$FWMARK"
+	iptables -t mangle -A OUTPUT -j BOX_MIHOMO_LOCAL
+fi

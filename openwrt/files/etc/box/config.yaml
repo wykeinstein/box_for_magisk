@@ -1,0 +1,67 @@
+# Default Mihomo (Clash Meta) config for OpenWrt.
+# Put your nodes in proxies/proxy-providers and add them to the PROXY group.
+
+mixed-port: 10801
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: info
+ipv6: false
+external-controller: 0.0.0.0:9090
+external-ui: /etc/box/dashboard
+
+# OpenWrt transparent proxy ports. Keep these synchronized with /etc/config/box.
+tproxy-port: 9898
+redir-port: 9797
+routing-mark: 255
+
+geodata-mode: true
+geox-url:
+  geoip: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
+  geosite: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+  mmdb: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb"
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "localhost.ptlogin2.qq.com"
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+  fallback:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+  nameserver-policy:
+    "geosite:cn,private,apple":
+      - https://doh.pub/dns-query
+      - https://dns.alidns.com/dns-query
+
+proxies: []
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - DIRECT
+
+rules:
+  - GEOSITE,private,DIRECT
+  - GEOSITE,cn,DIRECT
+  - GEOIP,private,DIRECT,no-resolve
+  - GEOIP,CN,DIRECT,no-resolve
+  - MATCH,PROXY

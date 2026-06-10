@@ -11,11 +11,8 @@ FWMARK="1"
 ROUTE_TABLE="100"
 ROUTING_MARK="255"
 PROXY_ROUTER_TCP="0"
-SERVER_IPS=""
-
-append_server_ip() {
-	SERVER_IPS="${SERVER_IPS} $1"
-}
+LAN_WHITELIST_FILE="/etc/box/lan_whitelist"
+LAN_WHITELIST_SET="box_lan_whitelist"
 
 load_box_firewall_config() {
 	config_load box 2>/dev/null
@@ -27,13 +24,36 @@ load_box_firewall_config() {
 	config_get ROUTE_TABLE main table "100"
 	config_get ROUTING_MARK main routing_mark "255"
 	config_get_bool PROXY_ROUTER_TCP main proxy_router_tcp 0
-	SERVER_IPS=""
-	config_list_foreach main server_ip append_server_ip
+	config_get LAN_WHITELIST_FILE main lan_whitelist_file "/etc/box/lan_whitelist"
+	config_get LAN_WHITELIST_SET main lan_whitelist_set "box_lan_whitelist"
+}
+
+box_fw_load_lan_whitelist() {
+	if ! command -v ipset >/dev/null 2>&1; then
+		echo "box: ipset command not found; install ipset/iptables-mod-ipset" >&2
+		return 1
+	fi
+
+	ipset create "$LAN_WHITELIST_SET" hash:net family inet -exist || return 1
+	ipset flush "$LAN_WHITELIST_SET" || return 1
+
+	[ -r "$LAN_WHITELIST_FILE" ] || return 0
+	while IFS= read -r line || [ -n "$line" ]; do
+		line="${line%%#*}"
+		for ip in $line; do
+			ipset add "$LAN_WHITELIST_SET" "$ip" -exist 2>/dev/null || \
+				echo "box: ignored invalid LAN whitelist entry: $ip" >&2
+		done
+	done < "$LAN_WHITELIST_FILE"
 }
 
 box_fw_cleanup() {
+	iptables -t nat -D PREROUTING -i "$LAN_IF" -m set --match-set "$LAN_WHITELIST_SET" src -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null
+	iptables -t nat -D PREROUTING -i "$LAN_IF" -m set --match-set "$LAN_WHITELIST_SET" src -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null
+	# Remove pre-whitelist rules left by older installs during upgrade.
 	iptables -t nat -D PREROUTING -i "$LAN_IF" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null
 	iptables -t nat -D PREROUTING -i "$LAN_IF" -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null
+	iptables -t mangle -D PREROUTING -i "$LAN_IF" -m set --match-set "$LAN_WHITELIST_SET" src -j BOX_MIHOMO 2>/dev/null
 	iptables -t mangle -D PREROUTING -i "$LAN_IF" -j BOX_MIHOMO 2>/dev/null
 	iptables -t mangle -D OUTPUT -j BOX_MIHOMO_LOCAL 2>/dev/null
 	iptables -t mangle -F BOX_MIHOMO 2>/dev/null
@@ -47,6 +67,7 @@ box_fw_cleanup() {
 load_box_firewall_config
 box_fw_cleanup
 [ "$BOX_ENABLED" = "1" ] || exit 0
+box_fw_load_lan_whitelist || exit 1
 
 ip rule add fwmark "$FWMARK" table "$ROUTE_TABLE" 2>/dev/null
 ip route add local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" 2>/dev/null
@@ -54,22 +75,17 @@ ip route add local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" 2>/dev/null
 iptables -t mangle -N BOX_MIHOMO 2>/dev/null
 iptables -t mangle -N BOX_MIHOMO_LOCAL 2>/dev/null
 
-# DNS hijack: LAN clients use Mihomo DNS so fake-ip and nameserver-policy work.
-iptables -t nat -A PREROUTING -i "$LAN_IF" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
-iptables -t nat -A PREROUTING -i "$LAN_IF" -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
+# DNS hijack: only whitelisted LAN clients use Mihomo DNS so fake-ip and nameserver-policy work.
+iptables -t nat -A PREROUTING -i "$LAN_IF" -m set --match-set "$LAN_WHITELIST_SET" src -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
+iptables -t nat -A PREROUTING -i "$LAN_IF" -m set --match-set "$LAN_WHITELIST_SET" src -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
 
-# Let DNS hijack below send LAN DNS to Mihomo DNS before generic TProxy rules.
+# Let DNS hijack above send whitelisted LAN DNS to Mihomo DNS before generic TProxy rules.
 iptables -t mangle -A BOX_MIHOMO -p udp --dport 53 -j RETURN
 iptables -t mangle -A BOX_MIHOMO -p tcp --dport 53 -j RETURN
 
 # Bypass traffic emitted by Mihomo itself. config.yaml sets routing-mark: 255.
 iptables -t mangle -A BOX_MIHOMO -m mark --mark "$ROUTING_MARK" -j RETURN
 iptables -t mangle -A BOX_MIHOMO_LOCAL -m mark --mark "$ROUTING_MARK" -j RETURN
-
-for ip in $SERVER_IPS; do
-	iptables -t mangle -A BOX_MIHOMO -d "$ip" -j RETURN
-	iptables -t mangle -A BOX_MIHOMO_LOCAL -d "$ip" -j RETURN
-done
 
 for subnet in \
 	0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 \
@@ -81,7 +97,7 @@ done
 
 iptables -t mangle -A BOX_MIHOMO -p tcp -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$FWMARK"
 iptables -t mangle -A BOX_MIHOMO -p udp -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$FWMARK"
-iptables -t mangle -A PREROUTING -i "$LAN_IF" -j BOX_MIHOMO
+iptables -t mangle -A PREROUTING -i "$LAN_IF" -m set --match-set "$LAN_WHITELIST_SET" src -j BOX_MIHOMO
 
 if [ "$PROXY_ROUTER_TCP" = "1" ]; then
 	iptables -t mangle -A BOX_MIHOMO_LOCAL -p tcp -j MARK --set-mark "$FWMARK"

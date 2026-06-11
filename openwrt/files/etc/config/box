@@ -10,6 +10,5 @@ config box 'main'
 	option table '100'
 	option routing_mark '255'
 	option proxy_router_tcp '0'
-	# Only LAN source IPs listed in this file are intercepted and sent to Mihomo.
-	option lan_whitelist_file '/etc/box/lan_whitelist'
-	option lan_whitelist_set 'box_lan_whitelist'
+	# Add the resolved IP address of each proxy server here to avoid proxy loops.
+	# list server_ip '203.0.113.10'

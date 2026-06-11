@@ -1,5 +1,0 @@
-# LAN source IP whitelist for transparent proxy interception.
-# One IPv4 address or CIDR per line. Inline comments are allowed.
-# Examples:
-# 192.168.1.100
-# 192.168.1.128/25

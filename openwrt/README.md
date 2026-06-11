@@ -14,11 +14,9 @@ sh openwrt/install.sh
 The installer copies:
 
 - `/etc/box/config.yaml` - default Mihomo rule-mode config
-- `/etc/config/box` - UCI settings for ports, LAN interface, marks, and whitelist paths
+- `/etc/config/box` - UCI settings for ports, LAN interface, marks, and bypass IPs
 - `/etc/init.d/box` - procd service that runs `/usr/bin/mihomo -d /etc/box -f /etc/box/config.yaml`
 - `/etc/box/firewall.include` - firewall3/iptables TProxy and DNS hijack rules
-- `/etc/box/lan_whitelist` - LAN source-IP/CIDR whitelist for interception
-- `/etc/box/reload_lan_whitelist` - hot-reload helper for frequent whitelist edits
 
 The installer does not bundle a Mihomo binary. If `/usr/bin/mihomo` is missing, install it manually or pass one of these variables:
 
@@ -30,29 +28,19 @@ MIHOMO_URL=https://example.com/mihomo-linux-your-arch sh openwrt/install.sh
 ## Configure
 
 1. Edit `/etc/box/config.yaml` and add your proxies or proxy-providers.
-2. Add the LAN clients that should enter transparent proxying to `/etc/box/lan_whitelist`:
+2. Add each proxy server IP to `/etc/config/box` to prevent loops:
 
 ```sh
-cat >> /etc/box/lan_whitelist <<'EOF'
-192.168.1.100
-192.168.1.128/25
-EOF
+uci add_list box.main.server_ip='203.0.113.10'
+uci commit box
 ```
 
-3. Hot-reload whitelist changes whenever you add or remove entries:
-
-```sh
-/etc/box/reload_lan_whitelist
-```
-
-4. Restart services only when changing Mihomo config or firewall/UCI settings:
+3. Restart services:
 
 ```sh
 /etc/init.d/box restart
 /etc/init.d/firewall restart
 ```
-
-Proxy-server/node IP bypass lists are no longer used. Mihomo's own outbound traffic is bypassed by its `routing-mark`, which prevents re-entry without excluding node destination IPs for LAN clients.
 
 ## Verify
 
@@ -63,7 +51,6 @@ ip rule show
 ip route show table 100
 iptables -t nat -vnL PREROUTING
 iptables -t mangle -vnL BOX_MIHOMO
-ipset list box_lan_whitelist
 ```
 
 ## Uninstall
@@ -72,4 +59,4 @@ ipset list box_lan_whitelist
 sh openwrt/uninstall.sh
 ```
 
-The uninstall script removes the service, UCI file, and firewall include. It keeps `/etc/box/config.yaml`, `/etc/box/lan_whitelist`, and `/usr/bin/mihomo` so your user config, whitelist, and binary are not deleted accidentally.
+The uninstall script removes the service, UCI file, and firewall include. It keeps `/etc/box/config.yaml` and `/usr/bin/mihomo` so your user config and binary are not deleted accidentally.

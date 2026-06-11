@@ -9,8 +9,10 @@ This repository has been trimmed to keep only the files required for OpenWrt ins
 - `openwrt/install.sh` - installs OpenWrt dependencies, copies config/service/firewall files, enables the service, and restarts firewall/Mihomo.
 - `openwrt/uninstall.sh` - removes the OpenWrt service, UCI config, and firewall hook while preserving user Mihomo config and binary.
 - `openwrt/files/etc/box/config.yaml` - default Mihomo config with fake-ip DNS, CN DNS policy, TProxy port, routing mark, and CN/private direct rules.
-- `openwrt/files/etc/box/firewall.include` - firewall3/iptables TProxy and DNS hijack rules.
-- `openwrt/files/etc/config/box` - UCI settings for binary path, LAN interface, ports, marks, and proxy-server IP bypasses.
+- `openwrt/files/etc/box/firewall.include` - firewall3/iptables TProxy and DNS hijack rules that intercept traffic from whitelisted source IPs on any ingress interface.
+- `openwrt/files/etc/box/lan_whitelist` - editable source-IP whitelist; non-listed clients bypass the transparent proxy.
+- `openwrt/files/etc/box/reload_lan_whitelist` - hot-reloads whitelist changes into the active ipset without restarting Mihomo or firewall.
+- `openwrt/files/etc/config/box` - UCI settings for binary path, ports, marks, and whitelist paths.
 - `openwrt/files/etc/init.d/box` - procd service for `/usr/bin/mihomo`.
 - `openwrt/README.md` - detailed OpenWrt install/configure/verify/uninstall instructions.
 
@@ -32,16 +34,18 @@ MIHOMO_URL=https://example.com/mihomo-linux-your-arch sh openwrt/install.sh
 
 Then edit `/etc/box/config.yaml` and add your proxies or proxy providers.
 
-## Configure proxy-server IP bypass
+## Configure the source IP whitelist
 
-Add each resolved proxy server IP to `/etc/config/box` so the router does not loop Mihomo's own outbound tunnel back into TProxy:
+Only clients whose source IPs are listed in `/etc/box/lan_whitelist` are intercepted and sent to the Mihomo transparent proxy, regardless of which interface they enter OpenWrt from. All other clients bypass these TProxy and DNS hijack rules.
+
+Add or remove IPv4 addresses/CIDRs, then hot-reload the ipset:
 
 ```sh
-uci add_list box.main.server_ip='203.0.113.10'
-uci commit box
-/etc/init.d/firewall restart
-/etc/init.d/box restart
+echo '192.168.1.100' >> /etc/box/lan_whitelist
+/etc/box/reload_lan_whitelist
 ```
+
+The firewall no longer needs proxy-server/node IP bypass entries. Mihomo's own outbound traffic is bypassed by the `routing-mark` configured in `/etc/box/config.yaml`, so only Mihomo-marked traffic avoids re-entry.
 
 ## Verify
 
@@ -52,6 +56,7 @@ ip rule show
 ip route show table 100
 iptables -t nat -vnL PREROUTING
 iptables -t mangle -vnL BOX_MIHOMO
+ipset list box_lan_whitelist
 ```
 
 See [`openwrt/README.md`](openwrt/README.md) for full details.

@@ -22,6 +22,7 @@ load_box_config() {
 start_service() {
 	load_box_config
 	[ "$BOX_ENABLED" = "1" ] || return 0
+	[ -x /etc/box/apply_whitelist_schedule.sh ] && /etc/box/apply_whitelist_schedule.sh
 
 	if [ ! -x "$BOX_BIN" ]; then
 		echo "box: Mihomo binary not executable: $BOX_BIN" >&2

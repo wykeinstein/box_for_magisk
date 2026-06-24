@@ -10,15 +10,23 @@ if [ ! -f /etc/openwrt_release ]; then
 fi
 
 opkg update
-opkg install ca-bundle ip-full iptables iptables-mod-tproxy iptables-mod-extra kmod-ipt-tproxy kmod-ipt-socket
+opkg install ca-bundle ip-full ipset iptables iptables-mod-ipset iptables-mod-tproxy iptables-mod-extra kmod-ipt-ipset kmod-ipt-tproxy kmod-ipt-socket
 
 mkdir -p /etc/box /etc/config /etc/init.d
 cp -f "${ROOT_DIR}/etc/box/config.yaml" /etc/box/config.yaml
 cp -f "${ROOT_DIR}/etc/box/firewall.include" /etc/box/firewall.include
+cp -f "${ROOT_DIR}/etc/box/reload_lan_whitelist" /etc/box/reload_lan_whitelist
+cp -f "${ROOT_DIR}/etc/box/restore_box_lan_whitelist.sh" /etc/box/restore_box_lan_whitelist.sh
+cp -f "${ROOT_DIR}/etc/box/apply_whitelist_schedule.sh" /etc/box/apply_whitelist_schedule.sh
+[ -f /etc/box/lan_whitelist ] || cp -f "${ROOT_DIR}/etc/box/lan_whitelist" /etc/box/lan_whitelist
 cp -f "${ROOT_DIR}/etc/config/box" /etc/config/box
 cp -f "${ROOT_DIR}/etc/init.d/box" /etc/init.d/box
-chmod 0644 /etc/box/config.yaml /etc/config/box
-chmod 0755 /etc/box/firewall.include /etc/init.d/box
+chmod 0644 /etc/box/config.yaml /etc/config/box /etc/box/lan_whitelist
+if [ -n "${BOX_MODE:-}" ]; then
+	uci set box.main.mode="$BOX_MODE"
+	uci commit box
+fi
+chmod 0755 /etc/box/firewall.include /etc/box/reload_lan_whitelist /etc/box/restore_box_lan_whitelist.sh /etc/box/apply_whitelist_schedule.sh /etc/init.d/box
 
 if [ -n "${MIHOMO_BIN:-}" ]; then
 	cp -f "$MIHOMO_BIN" /usr/bin/mihomo
@@ -47,6 +55,7 @@ if ! grep -q '^\. /etc/box/firewall.include$' /etc/firewall.user 2>/dev/null; th
 fi
 
 /etc/init.d/box enable
+/etc/box/apply_whitelist_schedule.sh
 /etc/init.d/firewall restart
 if [ -x /usr/bin/mihomo ]; then
 	/etc/init.d/box restart

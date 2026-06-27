@@ -1,6 +1,6 @@
 # Box for OpenWrt
 
-A minimal OpenWrt installer for running **Mihomo (Clash Meta)** as a transparent proxy or behavior-audit traffic controller on OpenWrt 19.07/firewall3 routers.
+A minimal OpenWrt installer for running **Mihomo (Clash Meta)** as a transparent proxy on OpenWrt 19.07/firewall3 routers.
 
 This repository has been trimmed to keep only the files required for OpenWrt installation and operation. Android/Magisk, KernelSU, APatch, web UI, and multi-core module files have been removed from this OpenWrt-focused tree.
 
@@ -9,11 +9,8 @@ This repository has been trimmed to keep only the files required for OpenWrt ins
 - `openwrt/install.sh` - installs OpenWrt dependencies, copies config/service/firewall files, enables the service, and restarts firewall/Mihomo.
 - `openwrt/uninstall.sh` - removes the OpenWrt service, UCI config, and firewall hook while preserving user Mihomo config and binary.
 - `openwrt/files/etc/box/config.yaml` - default Mihomo config with fake-ip DNS, CN DNS policy, TProxy port, routing mark, and CN/private direct rules.
-- `openwrt/files/etc/box/firewall.include` - firewall3/iptables TProxy and DNS hijack rules for proxy and audit modes.
-- `openwrt/files/etc/box/lan_whitelist` - editable source-IP whitelist used by proxy mode.
-- `openwrt/files/etc/box/reload_lan_whitelist` - hot-reloads whitelist changes into the active ipset without restarting Mihomo or firewall.
-- `openwrt/files/etc/box/restore_box_lan_whitelist.sh` and `openwrt/files/etc/box/apply_whitelist_schedule.sh` - optional whitelist time-control helpers.
-- `openwrt/files/etc/config/box` - UCI settings for binary path, mode, ports, marks, whitelist paths, and time control.
+- `openwrt/files/etc/box/firewall.include` - firewall3/iptables TProxy and DNS hijack rules.
+- `openwrt/files/etc/config/box` - UCI settings for binary path, LAN interface, ports, marks, and proxy-server IP bypasses.
 - `openwrt/files/etc/init.d/box` - procd service for `/usr/bin/mihomo`.
 - `openwrt/README.md` - detailed OpenWrt install/configure/verify/uninstall instructions.
 
@@ -33,20 +30,18 @@ MIHOMO_BIN=/tmp/mihomo sh openwrt/install.sh
 MIHOMO_URL=https://example.com/mihomo-linux-your-arch sh openwrt/install.sh
 ```
 
-Then edit `/etc/box/config.yaml` and add your proxies or proxy providers. Use `BOX_MODE=proxy sh openwrt/install.sh` for whitelist transparent proxy mode or `BOX_MODE=audit sh openwrt/install.sh` to intercept all routed client traffic for behavior auditing.
+Then edit `/etc/box/config.yaml` and add your proxies or proxy providers.
 
-## Configure proxy or audit mode
+## Configure proxy-server IP bypass
 
-In `proxy` mode, only clients whose source IPs are listed in `/etc/box/lan_whitelist` are intercepted and sent to Mihomo. In `audit` mode, the whitelist is ignored and all routed client traffic is sent to Mihomo for logging, domain blocking, connection rejection, and policy control.
-
-For proxy mode, add or remove IPv4 addresses/CIDRs, then hot-reload the ipset:
+Add each resolved proxy server IP to `/etc/config/box` so the router does not loop Mihomo's own outbound tunnel back into TProxy:
 
 ```sh
-echo '192.168.1.100' >> /etc/box/lan_whitelist
-/etc/box/reload_lan_whitelist
+uci add_list box.main.server_ip='203.0.113.10'
+uci commit box
+/etc/init.d/firewall restart
+/etc/init.d/box restart
 ```
-
-Enable proxy-mode time control with `uci set box.main.time_control_enabled='1'; uci commit box; /etc/box/apply_whitelist_schedule.sh`. The defaults flush the whitelist every five minutes from 08:00 through 17:59 and restore it at 18:00. The firewall no longer needs proxy-server/node IP bypass entries. Mihomo's own outbound traffic is bypassed by the `routing-mark` configured in `/etc/box/config.yaml`, so only Mihomo-marked traffic avoids re-entry.
 
 ## Verify
 
@@ -57,8 +52,6 @@ ip rule show
 ip route show table 100
 iptables -t nat -vnL PREROUTING
 iptables -t mangle -vnL BOX_MIHOMO
-ipset list box_lan_whitelist
-crontab -l
 ```
 
 See [`openwrt/README.md`](openwrt/README.md) for full details.

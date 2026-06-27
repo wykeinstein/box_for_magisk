@@ -1,20 +1,14 @@
 config box 'main'
 	option enabled '1'
-	option mode 'proxy'
 	option bin '/usr/bin/mihomo'
 	option config '/etc/box/config.yaml'
 	option workdir '/etc/box'
+	option lan_if 'br-lan'
 	option tproxy_port '9898'
 	option dns_port '1053'
 	option fwmark '1'
 	option table '100'
 	option routing_mark '255'
 	option proxy_router_tcp '0'
-	# Proxy mode intercepts only source IPs listed in this file.
-	# Audit mode ignores this whitelist and intercepts all routed clients.
-	option lan_whitelist_file '/etc/box/lan_whitelist'
-	option lan_whitelist_set 'box_lan_whitelist'
-	# Proxy-mode time control: flush whitelist during this period, restore later.
-	option time_control_enabled '0'
-	option time_control_disable_cron '*/5 8-17 * * *'
-	option time_control_restore_cron '0 18 * * *'
+	# Add the resolved IP address of each proxy server here to avoid proxy loops.
+	# list server_ip '203.0.113.10'
